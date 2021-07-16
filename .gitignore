@@ -21,3 +21,5 @@ config/admins.json
 _docker/psql/
 
 __debug_bin
+
+.vscode/

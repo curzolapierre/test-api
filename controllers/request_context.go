@@ -13,8 +13,4 @@ type RequestContext struct {
 }
 
 func (r *RequestContext) InitStore(redisClient *redis.Client) {
-	r.RedisStore = &models.RedisStoreCodexcuses{
-		Log:         r.Log,
-		RedisClient: redisClient,
-	}
 }

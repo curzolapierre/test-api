@@ -1,19 +1,16 @@
 package main
 
 import (
-	"crypto/subtle"
-	"encoding/json"
+	"context"
 	"fmt"
 	"net/http"
 	"os"
 
-	"github.com/curzolapierre/hook-manager/controllers"
-	"github.com/curzolapierre/hook-manager/environment"
+	"github.com/Scalingo/go-utils/logger"
+	"github.com/curzolapierre/hook-manager/config"
 	redisCtr "github.com/curzolapierre/hook-manager/redis"
-	"github.com/gorilla/mux"
+	"github.com/curzolapierre/hook-manager/webserver"
 	"github.com/sirupsen/logrus"
-	"github.com/urfave/negroni"
-	"gopkg.in/errgo.v1"
 )
 
 func logLevel() logrus.Level {
@@ -48,101 +45,23 @@ func initLogger() logrus.FieldLogger {
 
 func main() {
 	log := initLogger()
-	environment.Lookup()
+	ctx := logger.ToCtx(context.Background(), log)
 
-	initRedis, err := redisCtr.Client()
+	config, err := config.Lookup()
 	if err != nil {
-		log.Error(errgo.Notef(err, "fail to init redis client"))
+		log.WithError(err).Panic("Fail to load environment")
 		return
 	}
-	ctr := &controllers.RequestContext{}
-	ctr.Log = log
-	ctr.InitStore(initRedis)
+
+	_, err = redisCtr.Client(config)
+	if err != nil {
+		log.WithError(err).Panic("fail to init redis client")
+		return
+	}
 
 	// Define routers
-	if r := routers(log, ctr); r != nil {
-		log.Fatal("Server exited:", http.ListenAndServe(fmt.Sprintf("%s:%s", environment.ENV["HTTP_HOST"], environment.ENV["HTTP_PORT"]), r))
+	if r := webserver.NewRouter(ctx, config); r != nil {
+		log.Infof("Server listen on: %v", fmt.Sprintf("%s:%s", config.HttpHost, config.HttpPort))
+		log.Fatal("Server exited:", http.ListenAndServe(fmt.Sprintf("%s:%s", config.HttpHost, config.HttpPort), r))
 	}
-
-	// Init general handler: containing health route
-
-	// Init Github handler: containing all use listening route of github
-
-	// Inint Docker handler: containing all use listening route of docker hub for each application
-
-}
-
-func endAPICall(w http.ResponseWriter, httpStatus int, anyStruct interface{}) {
-
-	result, err := json.MarshalIndent(anyStruct, "", "  ")
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(httpStatus)
-	w.Write(result)
-}
-
-func BasicAuth(w http.ResponseWriter, r *http.Request, username, password, realm string) bool {
-	user, pass, ok := r.BasicAuth()
-
-	if !ok || subtle.ConstantTimeCompare([]byte(user), []byte(username)) != 1 || subtle.ConstantTimeCompare([]byte(pass), []byte(password)) != 1 {
-		w.Header().Set("WWW-Authenticate", `Basic realm="`+realm+`"`)
-		w.WriteHeader(401)
-		w.Write([]byte("401 Unauthorized\n"))
-		return false
-	}
-
-	return true
-}
-
-type heath struct {
-	Service     string `json:"service"`
-	Environment string `json:"environment"`
-	Status      string `json:"status"`
-}
-
-func routers(log logrus.FieldLogger, ctr *controllers.RequestContext) *mux.Router {
-	username := environment.ENV["BASIC_AUTH_API_USER"]
-	password := environment.ENV["BASIC_AUTH_API_PASS"]
-
-	v1Path := "/api"
-	healthPath := "/health"
-
-	topRouter := mux.NewRouter().StrictSlash(true)
-	healthRouter := mux.NewRouter().PathPrefix(healthPath).Subrouter().StrictSlash(true)
-	v1Router := mux.NewRouter().PathPrefix(v1Path).Subrouter().StrictSlash(true)
-
-	healthRouter.HandleFunc("/ping", func(w http.ResponseWriter, r *http.Request) {
-		log.Debug("Health check called")
-		endAPICall(w, 200, heath{
-			Service:     "api",
-			Environment: environment.ENV["GO_ENV"],
-			Status:      "healthy",
-		})
-	})
-
-	v1Router.HandleFunc("/codexcuses/{source}", ctr.GetExcuses).Methods("GET")
-	v1Router.HandleFunc("/codexcuses/{source}/{id}", ctr.GetExcuse).Methods("GET")
-	v1Router.HandleFunc("/codexcuses/{source}", ctr.AddExcuse).Methods("POST")
-	v1Router.HandleFunc("/codexcuses/{source}/{id}", ctr.DeleteExcuse).Methods("DELETE")
-
-	topRouter.PathPrefix(healthPath).Handler(negroni.New(
-		/* Health-check routes are unprotected */
-		negroni.Wrap(healthRouter),
-	))
-
-	topRouter.PathPrefix(v1Path).Handler(negroni.New(
-		negroni.HandlerFunc(func(w http.ResponseWriter, r *http.Request, next http.HandlerFunc) {
-			if BasicAuth(w, r, username, password, "Provide user name and password") {
-				/* Call the next handler iff Basic-Auth succeeded */
-				next(w, r)
-			}
-		}),
-		negroni.Wrap(v1Router),
-	))
-
-	return topRouter
 }

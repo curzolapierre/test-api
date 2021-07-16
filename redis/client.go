@@ -1,14 +1,15 @@
 package redis
 
 import (
+	"errors"
 	"fmt"
 	"net/url"
+	"os"
 	"sync"
 	"time"
 
-	"github.com/curzolapierre/hook-manager/environment"
+	"github.com/curzolapierre/hook-manager/config"
 	"github.com/go-redis/redis"
-	"gopkg.in/errgo.v1"
 )
 
 var (
@@ -19,20 +20,20 @@ var (
 )
 
 func Prefix() string {
-	return fmt.Sprintf("%s:%s:", prefix, environment.ENV["GO_ENV"])
+	return fmt.Sprintf("%s:%s:", prefix, os.Getenv("GO_ENV"))
 }
 
-func Client() (*redis.Client, error) {
+func Client(config config.Config) (*redis.Client, error) {
 	initRedis.Do(func() {
 		var pass string
-		if environment.ENV["REDIS_URL"] == "" {
-			errInit = errgo.New("No redis credentials (ENV[REDIS_URL])")
+		if config.RedisURL == "" {
+			errInit = errors.New("No redis credentials (ENV[REDIS_URL])")
 			return
 		}
 
-		redisURL, err := url.Parse(environment.ENV["REDIS_URL"])
+		redisURL, err := url.Parse(config.RedisURL)
 		if err != nil {
-			errInit = errgo.Mask(err)
+			errInit = err
 			return
 		}
 
@@ -43,7 +44,7 @@ func Client() (*redis.Client, error) {
 		redisClient = redis.NewClient(&redis.Options{
 			Password:    pass,
 			Addr:        redisURL.Host,
-			PoolSize:    environment.RedisPoolSize,
+			PoolSize:    config.RedisPoolSize,
 			MaxRetries:  3,
 			IdleTimeout: 80 * time.Second,
 		})

@@ -7,10 +7,22 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/Scalingo/go-utils/logger"
 	"github.com/curzolapierre/hook-manager/models"
 	"github.com/gorilla/mux"
-	"gopkg.in/errgo.v1"
+	"github.com/pkg/errors"
 )
+
+type ExcuseController struct {
+	Codexcuse  models.Codexcuse
+	RedisStore *models.RedisStoreCodexcuses
+}
+
+func NewExcuseController() ExcuseController {
+	return ExcuseController{
+		RedisStore: &models.RedisStoreCodexcuses{},
+	}
+}
 
 // A global variable that is incremented everytime a excuse is added.
 // Used for providing a unique ID to each excuse
@@ -29,8 +41,11 @@ type excuseResp struct {
 }
 
 // GetExcuses return a page of excuses
-func (c RequestContext) GetExcuses(w http.ResponseWriter, r *http.Request) {
-	c.Log.WithField("function", "GetExcuses").Infoln("received on", r.URL.Path)
+func (c ExcuseController) GetExcuses(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	log := logger.Get(ctx)
+
+	log.WithField("function", "GetExcuses").Infoln("received on", r.URL.Path)
 	w.Header().Set("Content-Type", "application/json")
 	vars := mux.Vars(r)
 
@@ -59,9 +74,9 @@ func (c RequestContext) GetExcuses(w http.ResponseWriter, r *http.Request) {
 	}
 
 	excuses := []models.Codexcuse{}
-	meta, err := c.RedisStore.GetAll(vars["source"], int(page), &excuses)
+	meta, err := c.RedisStore.GetAll(ctx, vars["source"], int(page), &excuses)
 	if err != nil {
-		c.Log.Error(errgo.Notef(err, "fail to get excuse"))
+		log.Error(errors.Wrap(err, "fail to get excuse"))
 		resp := response{
 			Message: "Internal error",
 		}
@@ -78,14 +93,17 @@ func (c RequestContext) GetExcuses(w http.ResponseWriter, r *http.Request) {
 }
 
 // GetExcuse gives an excuse with some ID
-func (c RequestContext) GetExcuse(w http.ResponseWriter, r *http.Request) {
-	c.Log.WithField("function", "GetExcuse").Infoln("received on", r.URL.Path)
+func (c ExcuseController) GetExcuse(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	log := logger.Get(ctx)
+
+	log.WithField("function", "GetExcuse").Infoln("received on", r.URL.Path)
 	w.Header().Set("Content-Type", "application/json")
 	vars := mux.Vars(r)
 
-	excuse, err := c.RedisStore.Get(vars["source"], vars["id"])
+	excuse, err := c.RedisStore.Get(ctx, vars["source"], vars["id"])
 	if err != nil {
-		c.Log.Error(errgo.Notef(err, "fail to get excuse"))
+		log.Error(errors.Wrap(err, "fail to get excuse"))
 		resp := response{
 			Message: "Internal error",
 		}
@@ -106,14 +124,17 @@ func (c RequestContext) GetExcuse(w http.ResponseWriter, r *http.Request) {
 }
 
 // getUserExcuses gives an excuse with some ID
-func (c RequestContext) getUserExcuses(w http.ResponseWriter, r *http.Request) {
-	c.Log.WithField("function", "getUserExcuses").Infoln("received on", r.URL.Path)
+func (c ExcuseController) getUserExcuses(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	log := logger.Get(ctx)
+
+	log.WithField("function", "getUserExcuses").Infoln("received on", r.URL.Path)
 	w.Header().Set("Content-Type", "application/json")
 	vars := mux.Vars(r)
 
-	excuses, err := c.RedisStore.GetByUser(vars["source"], r.URL.Query().Get("user"))
+	excuses, err := c.RedisStore.GetByUser(ctx, vars["source"], r.URL.Query().Get("user"))
 	if err != nil {
-		c.Log.Error(errgo.Notef(err, "fail to get excuses by user"))
+		log.Error(errors.Wrap(err, "fail to get excuses by user"))
 		resp := response{
 			Message: "Internal error",
 		}
@@ -128,14 +149,17 @@ func (c RequestContext) getUserExcuses(w http.ResponseWriter, r *http.Request) {
 }
 
 // getRandomExcuse gives an excuse with some ID
-func (c RequestContext) getRandomExcuse(w http.ResponseWriter, r *http.Request) {
-	c.Log.WithField("function", "getRandomExcuse").Infoln("received on", r.URL.Path)
+func (c ExcuseController) getRandomExcuse(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	log := logger.Get(ctx)
+
+	log.WithField("function", "getRandomExcuse").Infoln("received on", r.URL.Path)
 	w.Header().Set("Content-Type", "application/json")
 	vars := mux.Vars(r)
 
-	excuse, err := c.RedisStore.GetRandom(vars["source"])
+	excuse, err := c.RedisStore.GetRandom(ctx, vars["source"])
 	if err != nil {
-		c.Log.Error(errgo.Notef(err, "fail to get random excuse"))
+		log.Error(errors.Wrap(err, "fail to get random excuse"))
 		resp := response{
 			Message: "Internal error",
 		}
@@ -148,39 +172,42 @@ func (c RequestContext) getRandomExcuse(w http.ResponseWriter, r *http.Request) 
 }
 
 // AddExcuse adds a new Excuse
-func (c RequestContext) AddExcuse(w http.ResponseWriter, r *http.Request) {
-	c.Log.WithField("function", "AddExcuse").Infoln("received on", r.URL.Path)
+func (c ExcuseController) AddExcuse(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	log := logger.Get(ctx)
+
+	log.WithField("function", "AddExcuse").Infoln("received on", r.URL.Path)
 	w.Header().Set("Content-Type", "application/json")
 	vars := mux.Vars(r)
 
 	var excuse models.Codexcuse
 	_ = json.NewDecoder(r.Body).Decode(&excuse)
 
-	var errors []string
+	var retErrors []string
 	if excuse.Author == nil || excuse.Author.UserName == "" {
 		errorStr := "missing Author field"
-		c.Log.Debugln("fail to save excuse", errorStr)
-		errors = append(errors, errorStr)
+		log.Debugln("fail to save excuse", errorStr)
+		retErrors = append(retErrors, errorStr)
 	}
 	if excuse.Reporter == nil || excuse.Reporter.UserName == "" || excuse.Reporter.ID == "" {
 		errorStr := "missing reporter field"
-		c.Log.Debugln("fail to save excuse", errorStr)
-		errors = append(errors, errorStr)
+		log.Debugln("fail to save excuse", errorStr)
+		retErrors = append(retErrors, errorStr)
 	}
 	if excuse.Content == "" {
 		errorStr := "missing content field"
-		c.Log.Debugln("fail to save excuse", errorStr)
-		errors = append(errors, errorStr)
+		log.Debugln("fail to save excuse", errorStr)
+		retErrors = append(retErrors, errorStr)
 	}
 	if excuse.Title == "" {
 		errorStr := "missing title field"
-		c.Log.Debugln("fail to save excuse", errorStr)
-		errors = append(errors, errorStr)
+		log.Debugln("fail to save excuse", errorStr)
+		retErrors = append(retErrors, errorStr)
 	}
-	if errors != nil {
+	if retErrors != nil {
 		w.WriteHeader(http.StatusUnprocessableEntity)
-		errArray := make([]string, 0, len(errors))
-		for _, attrErrs := range errors {
+		errArray := make([]string, 0, len(retErrors))
+		for _, attrErrs := range retErrors {
 			errArray = append(errArray, fmt.Sprintf("\t→ %s", attrErrs))
 		}
 		resp := response{
@@ -190,9 +217,9 @@ func (c RequestContext) AddExcuse(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err := c.RedisStore.Add(vars["source"], excuse)
+	err := c.RedisStore.Add(ctx, vars["source"], excuse)
 	if err != nil {
-		c.Log.Error(errgo.Notef(err, "fail to save excuse"))
+		log.Error(errors.Wrap(err, "fail to save excuse"))
 		resp := response{
 			Message: "Internal error",
 		}
@@ -208,14 +235,17 @@ func (c RequestContext) AddExcuse(w http.ResponseWriter, r *http.Request) {
 }
 
 // DeleteExcuse deletes the excuse with some ID
-func (c RequestContext) DeleteExcuse(w http.ResponseWriter, r *http.Request) {
-	c.Log.WithField("function", "DeleteExcuse").Infoln("received on", r.URL.Path)
+func (c ExcuseController) DeleteExcuse(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	log := logger.Get(ctx)
+
+	log.WithField("function", "DeleteExcuse").Infoln("received on", r.URL.Path)
 	w.Header().Set("Content-Type", "application/json")
 	vars := mux.Vars(r)
 
-	err := c.RedisStore.Delete(vars["source"], vars["id"])
+	err := c.RedisStore.Delete(ctx, vars["source"], vars["id"])
 	if err != nil {
-		c.Log.Error(errgo.Notef(err, "fail to delete excuse: "+vars["id"]))
+		log.Error(errors.Wrap(err, "fail to delete excuse: "+vars["id"]))
 		resp := response{
 			Message: "Internal error",
 		}
