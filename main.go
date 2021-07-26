@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/Scalingo/go-utils/logger"
 	"github.com/curzolapierre/hook-manager/config"
@@ -59,9 +61,28 @@ func main() {
 		return
 	}
 
+	httpListenAddr := fmt.Sprintf("%s:%s", config.HttpHost, config.HttpPort)
+	log.Infof("Starting the web server on %v", httpListenAddr)
+
 	// Define routers
-	if r := webserver.NewRouter(ctx, config); r != nil {
-		log.Infof("Server listen on: %v", fmt.Sprintf("%s:%s", config.HttpHost, config.HttpPort))
-		log.Fatal("Server exited:", http.ListenAndServe(fmt.Sprintf("%s:%s", config.HttpHost, config.HttpPort), r))
+	router := webserver.NewRouter(ctx, config)
+
+	go func() {
+		err := http.ListenAndServe(httpListenAddr, router)
+		if err != nil {
+			log.WithError(err).Error("Fail to start web server")
+			os.Exit(-1)
+		}
+	}()
+
+	signals := make(chan os.Signal, 1)
+	signal.Notify(signals, syscall.SIGTERM, syscall.SIGINT, syscall.SIGQUIT)
+	for range signals {
+		log.Info("Stopping the server")
+		// for _, stopper := range stoppers {
+		// 	stopper()
+		// }
+		os.Exit(0)
 	}
+
 }

@@ -27,6 +27,8 @@ func NewRouter(ctx context.Context, config config.Config) *mux.Router {
 
 	healthRouter.HandleFunc("/ping", func(w http.ResponseWriter, r *http.Request) {
 		log.Debug("Health check called")
+		log.Info("IP of user using x-forwarded-for:", w.Header().Get("x-forwarded-for"))
+		log.Info("IP of user using x-real-ip:", w.Header().Get("x-real-ip"))
 		endAPICall(w, 200, heath{
 			Service:     "api",
 			Environment: config.GoEnv,
